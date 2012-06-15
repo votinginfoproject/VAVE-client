@@ -1,0 +1,10 @@
+# Swap files #
+*.swp
+
+# pcy files #
+*.pyc
+
+# files produced from client execution #
+*.zip
+*.db
+*.log
