@@ -12,7 +12,8 @@ CONTENT = ["simpleContent"]
 class Schema:
 
 	def __init__(self, schemafile):
-		self.schema = self.create_schema(etree.parse(schemafile))
+		xmlparser = etree.XMLParser()
+		self.schema = self.create_schema(etree.parse(schemafile, xmlparser))
 	
 	def create_schema(self, schema_data):
 		def getXSVal(element): #removes namespace
@@ -223,11 +224,12 @@ class Schema:
 			
 
 if __name__ == '__main__':
-	fschema = urllib.urlopen("https://github.com/votinginfoproject/vip-specification/raw/master/vip_spec_v3.0.xsd")
+	fschema = urllib.urlopen("https://github.com/votinginfoproject/vip-specification/raw/master/vip_spec_v4.0.xsd")
 #	fschema = open("../demo_data/schema.txt")
 
 	schema = Schema(fschema)
 
+	print schema.schema
 	simples = schema.get_simpleTypes()
 	print schema.get_simpleTypes()
 	print schema.get_complexTypes()
