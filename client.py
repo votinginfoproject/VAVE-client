@@ -1,15 +1,18 @@
 import sqlite3
-from simpleformatcheck import SimpleFormatCheck
-from urllib import urlopen
+from urllib import urlopen, urlencode
+import httplib, json
 from sys import exit
 from ConfigParser import ConfigParser
 from datetime import datetime
 from hashlib import md5
-import put
 import os
 import zipfile
+from schemaprops import SchemaProps
+from boto.s3.connection import S3Connection
+from boto.s3.key import Key
 	
 CONFIG_FILE = "client.cfg"
+DEFAULT_FILES = ["source.txt", "election.txt"]
 
 def get_schema_file():
 	location_type = config.get("schema", "location_type")
@@ -30,12 +33,10 @@ def write_logs(status):
 	
 	if status == "invalid":
 		w.write("Could not process data, missing files and/or no xml file provided\n")
-		w.write("Missing files: " + str(fc.missing_files()) + "\n\n")
 	if status == "empty":
 		w.write("No update sent due to lack of file changes\n\n")
 	if status == "success":
 		w.write("Files successfully sent: " + str(files_to_send) + "\n")
-		w.write("Invalid files that failed to send: " + str(fc.get_invalid_files().keys()) + "\n\n")
 
 def has_changed(fname):
 	cursor.execute("SELECT hash FROM file_data WHERE file_name = '" + fname + "'")
@@ -58,23 +59,26 @@ def file_hash(fname):
 			m.update(data)
 	return m.hexdigest()
 
-def send_files(files_to_send):
+def send_files(files_to_send, key, bucket, directory):
 	
 	output_file = config.get("local_settings", "output_file")
-	output_url = config.get("connection_settings", "output_url")
 	f = zipfile.ZipFile(output_file, "w")
 	for name in files_to_send:
 		f.write(name, os.path.basename(name), zipfile.ZIP_DEFLATED)
 	f.close()
-	return
-	f = open(output_file, 'rb')
-	put.putfile(f, output_url + output_file)
-	f.close()
-
-def get_xml():
-	for fname in os.listdir(file_directory):
-		if fname.endswith(".xml"):
-			return fname
+	setup_headers = {"Content-type": "application/json", "Accept": "text/plain"}
+	conn = httplib.HTTPSConnection("px558.o1.gondor.io")
+	conn.request("GET", "/api/data/upload-request/", '', setup_headers)
+	response = conn.getresponse()
+	aws_setup = json.loads(response.read())
+	access_val = aws_setup["AWSAccessKeyId"]
+	conn = S3Connection(access_val, key)
+	b = conn.create_bucket(bucket)
+	k = Key(b)
+	k.key = directory + output_file
+	print "sending files"
+	k.set_contents_from_filename(output_file)
+	conn.close()
 
 def clean_directory(directory):
 	if not directory.endswith("/"):
@@ -85,50 +89,60 @@ config = ConfigParser()
 config.read(CONFIG_FILE)
 
 schema_file = get_schema_file()
+sp = SchemaProps(schema_file)
+db_file_list = sp.key_list("db")
 
 file_directory = config.get("local_settings", "file_directory")
 file_directory = clean_directory(file_directory)
-fc = SimpleFormatCheck(schema_file, file_directory)
-
-fc.validate_files()
-valid_files = fc.get_valid_files()
+key = config.get("connection_settings", "key")
+bucket = config.get("connection_settings", "bucket")
+directory = config.get("connection_settings", "output_folder")
 
 connection = sqlite3.connect(config.get("app_settings", "db_host"))
 cursor = connection.cursor()
 setup_db()
 
-default_files = config.get("app_settings","default_files").split(",")
-
 files_to_send = []
+xml_file = None
+config_file = None
+new_data = False
+
+files_list = os.listdir(file_directory)
 
 if config.has_option("local_settings","feed_data") and len(config.get("local_settings","feed_data")) > 0:
 	feed_file = config.get("local_settings","feed_data")
-	full_name = file_directory + feed_file
-	if has_changed(full_name):
-		files_to_send.append(full_name)
+	if os.exists(feed_file):
+		xml_file = feed_file
+	if has_changed(feed_file):
+		new_data = True
+		files_to_send.append(xml_file)
 else:
-	for fname in os.listdir(file_directory):
-		full_name = file_directory + fname
-		if fname.endswith(".xml") or fname == CONFIG_FILE:
-			if has_changed(full_name):
-				files_to_send.append(full_name)
-		elif fname in valid_files:
-			if has_changed(full_name):
-				files_to_send.append(full_name)
-
-if len(files_to_send) > 0:
-	xml_doc = get_xml()
-	if xml_doc and not any(f.endswith(".xml") for f in files_to_send):
-		files_to_send.append(file_directory + xml_doc)
-	elif not xml_doc:
-		for f in default_files:
-			if (file_directory + f not in files_to_send) and (f in os.listdir(file_directory)):
+	for f in files_list:
+		if f.endswith(".xml"):
+			xml_file = file_directory+f
+			if has_changed(xml_file):
+				new_data = True
+				files_to_send.append(xml_file)
+		elif f == CONFIG_FILE:
+			config_file = file_directory + f
+		elif f.lower().split(".")[0] in db_file_list:
+			if has_changed(file_directory + f):
+				new_data = True
 				files_to_send.append(file_directory + f)
-			elif f not in os.listdir(file_directory):
+			
+if new_data:
+	if xml_file and xml_file not in files_to_send:
+		files_to_send.append(xml_file)
+	else:
+		for d in DEFAULT_FILES:
+			if (file_directory + d) not in files_to_send and d in files_list:
+				files_to_send.append(file_directory + d)
+			elif d not in files_list:
 				write_logs("invalid")
 				exit(0)
-	send_files(files_to_send)
+	if config_file:
+		files_to_send.append(config_file)
+	send_files(files_to_send, key, bucket, directory)
 	write_logs("success")
-else :
+else:
 	write_logs("empty")
-
