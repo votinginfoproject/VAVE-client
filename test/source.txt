@@ -1,0 +1,2 @@
+ID,NAME,VIP_ID,DATETIME,DESCRIPTION,ORGANIZATION_URL
+1,Mississippi Secretary of State,28,2012-02-23T01:27:12,The Secretary of State's office is the source for state election information in Mississippi. This feed provides information on election dates, districts, and precinct boundaries,http://www.sos.ms.gov/
