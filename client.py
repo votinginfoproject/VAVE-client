@@ -21,7 +21,7 @@ def get_schema_file():
 	if location_type == "url":
 		return urlopen(location)
 	elif location_type == "file":
-		return open(location)
+		return location
 
 def setup_db():
 	cursor.execute("CREATE TABLE IF NOT EXISTS file_data (file_name TEXT, hash TEXT)")
